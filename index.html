@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+  <meta id="pwa-viewport-meta" name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>진리로교회</title>
   <link rel="manifest" href="./manifest.json">
   <link rel="icon" type="image/png" href="./Icon.png">
@@ -22,6 +22,8 @@
       background: #ffffff;
       overflow: hidden;
       -webkit-tap-highlight-color: transparent;
+      -webkit-text-size-adjust: 100%;
+      touch-action: manipulation;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
     }
     #pwa-shell {
@@ -35,6 +37,59 @@
       display: flex;
       flex-direction: column;
       background: #ffffff;
+    }
+    #install-banner {
+      display: none;
+      background: #eff6ff;
+      border-bottom: 1.5px solid #93c5fd;
+      padding: 10px 12px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-shrink: 0;
+      z-index: 999;
+    }
+    #install-banner.show {
+      display: flex;
+    }
+    #install-cta-btn {
+      flex: 1;
+      background: #2563eb;
+      color: #ffffff;
+      border: none;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 16px;
+      font-weight: 800;
+      cursor: pointer;
+      text-align: center;
+      box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+    }
+    #install-cta-btn:active {
+      background: #1d4ed8;
+    }
+    #install-guide-text {
+      display: none;
+      flex: 1;
+      font-size: 14px;
+      font-weight: 700;
+      color: #1e3a8a;
+      line-height: 1.45;
+    }
+    #install-dismiss-btn {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      color: #64748b;
+      border-radius: 8px;
+      width: 34px;
+      height: 34px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
     #app-frame {
       width: 100%;
@@ -54,6 +109,11 @@
 </head>
 <body>
   <div id="pwa-shell">
+    <div id="install-banner">
+      <button type="button" id="install-cta-btn">📲 진리로교회 앱 설치하기</button>
+      <div id="install-guide-text"></div>
+      <button type="button" id="install-dismiss-btn" title="닫기">✕</button>
+    </div>
     <div id="setup-warning">
       <h3 style="color:#dc2626; margin-bottom:8px;">⚠️ 웹앱 주소 설정 필요</h3>
       <p style="font-size:14px;">GitHub의 <code>index.html</code> 파일에서 <code>GAS_WEBAPP_URL</code>에<br>구글 Apps Script 배포 주소(<code>.../exec</code>)를 입력해 주세요.</p>
@@ -70,7 +130,7 @@
     // ========================================================================
     // ★ [필수] 아래 따옴표 안에 구글 Apps Script 웹앱 배포 주소(.../exec)를 붙여넣으세요!
     // ========================================================================
-    const GAS_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyMGBhLugLehVIBEO_TTK3EucQ4_mGmjLo3bPhT30i-TyuMV3W4aqwthRjzrADjjQLw/exec";
+    const GAS_WEBAPP_URL = ""https://script.google.com/macros/s/AKfycbyMGBhLugLehVIBEO_TTK3EucQ4_mGmjLo3bPhT30i-TyuMV3W4aqwthRjzrADjjQLw/exe";
 
     const GOOGLE_CLIENT_ID = "9947286323-k5bo8cr27vfk80180p3m7conuvrb56h4.apps.googleusercontent.com";
     const TOKEN_STORAGE_KEY = "jinri_pwa_id_token_v1";
@@ -78,6 +138,93 @@
 
     let cachedIdToken = "";
     let gasFrameSource = null;
+    let deferredInstallPrompt = null;
+
+    // 0. 카카오톡 인앱 브라우저 자동 탈출 (안드로이드)
+    (function escapeInAppBrowser() {
+      const ua = navigator.userAgent || "";
+      if (/KAKAOTALK/i.test(ua) && /Android/i.test(ua)) {
+        window.location.href = "kakaotalk://web/openExternal?url=" + encodeURIComponent(window.location.href);
+      }
+    })();
+
+    // 0-1. 앱 설치 배너 제어 (이미 설치된 standalone 실행 시 자동 숨김)
+    function isRunningStandalone() {
+      return (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+        window.navigator.standalone === true;
+    }
+
+    const installBanner = document.getElementById("install-banner");
+    const installCtaBtn = document.getElementById("install-cta-btn");
+    const installGuideText = document.getElementById("install-guide-text");
+    const installDismissBtn = document.getElementById("install-dismiss-btn");
+
+    if (installDismissBtn) {
+      installDismissBtn.addEventListener("click", function() {
+        installBanner.classList.remove("show");
+      });
+    }
+
+    window.addEventListener("beforeinstallprompt", function(e) {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+      if (!isRunningStandalone()) {
+        installGuideText.style.display = "none";
+        installCtaBtn.style.display = "block";
+        installCtaBtn.innerText = "📲 진리로교회 앱 설치하기";
+        installBanner.classList.add("show");
+      }
+    });
+
+    if (installCtaBtn) {
+      installCtaBtn.addEventListener("click", async function() {
+        if (deferredInstallPrompt) {
+          try {
+            deferredInstallPrompt.prompt();
+            const choice = await deferredInstallPrompt.userChoice;
+            if (choice && choice.outcome === "accepted") {
+              installBanner.classList.remove("show");
+            }
+          } catch (err) {}
+          deferredInstallPrompt = null;
+        } else {
+          installCtaBtn.style.display = "none";
+          installGuideText.style.display = "block";
+          installGuideText.innerHTML = "브라우저 메뉴(⋮ 또는 ≡) → <b>[앱 설치]</b> 또는 <b>[홈 화면에 추가]</b>를 눌러주세요.";
+        }
+      });
+    }
+
+    window.addEventListener("appinstalled", function() {
+      deferredInstallPrompt = null;
+      installBanner.classList.remove("show");
+    });
+
+    (function initOsInstallBanner() {
+      if (isRunningStandalone()) return;
+      const ua = navigator.userAgent || "";
+      const isIos = /iPhone|iPad|iPod/i.test(ua);
+      const isAndroid = /Android/i.test(ua);
+      if (isIos) {
+        installCtaBtn.style.display = "none";
+        installGuideText.style.display = "block";
+        if (/KAKAOTALK/i.test(ua)) {
+          installGuideText.innerHTML = "📲 <b>우측 하단 [⋯] → Safari로 열기</b> 후<br>공유(<svg style="width:16px;height:16px;vertical-align:-2px;margin:0 2px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M4 11v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/></svg>) → <b>[홈 화면에 추가]</b>를 눌러주세요.";
+        } else {
+          installGuideText.innerHTML = "📲 하단 <b>공유 버튼(<svg style="width:16px;height:16px;vertical-align:-2px;margin:0 2px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M4 11v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/></svg>) → [홈 화면에 추가]</b>를<br>누르면 앱처럼 바로 사용할 수 있습니다.";
+        }
+        installBanner.classList.add("show");
+      } else if (isAndroid && /SamsungBrowser/i.test(ua)) {
+        // 삼성 인터넷에서 beforeinstallprompt가 늦거나 미발생 시에도 버튼 즉시 안내
+        setTimeout(function() {
+          if (!isRunningStandalone() && !deferredInstallPrompt && !installBanner.classList.contains("show")) {
+            installGuideText.style.display = "none";
+            installCtaBtn.style.display = "block";
+            installBanner.classList.add("show");
+          }
+        }, 1200);
+      }
+    })();
 
     // 1. Service Worker 등록 (안드로이드/데스크톱 PWA 앱 설치 지원)
     if ("serviceWorker" in navigator) {
@@ -180,8 +327,40 @@
         if (txt && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
           navigator.clipboard.writeText(txt).catch(function() {});
         }
+      } else if (data.type === "JINRI_SET_ZOOM") {
+        setPwaZoomAllowed(Boolean(data.allow));
       }
     });
+
+    // 5-1. iOS 앱 전환 복귀 시 화면 확대 버그 방지 및 주보 확대 연동
+    let isPwaZoomAllowed = false;
+    function setPwaZoomAllowed(allow) {
+      isPwaZoomAllowed = Boolean(allow);
+      const vp = document.getElementById("pwa-viewport-meta");
+      if (!vp) return;
+      if (isPwaZoomAllowed) {
+        vp.setAttribute("content", "width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover");
+      } else {
+        vp.setAttribute("content", "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover");
+        try { window.scrollTo(0, 0); } catch (e) {}
+      }
+    }
+    function resetIosZoomOnResume() {
+      if (isPwaZoomAllowed) return;
+      const vp = document.getElementById("pwa-viewport-meta");
+      if (vp) {
+        vp.setAttribute("content", "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover");
+      }
+      try { window.scrollTo(0, 0); } catch (e) {}
+    }
+    document.addEventListener("visibilitychange", function() {
+      if (document.visibilityState === "visible") {
+        resetIosZoomOnResume();
+        setTimeout(resetIosZoomOnResume, 150);
+      }
+    });
+    window.addEventListener("pageshow", resetIosZoomOnResume);
+    window.addEventListener("focus", resetIosZoomOnResume);
 
     // 6. 초기화 및 앱 iframe 로드
     extractAndStoreInitialToken();
