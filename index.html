@@ -222,6 +222,15 @@
       });
     }
 
+    // 기존에 꼬인 서비스 워커 캐시 강제 해제
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.getRegistrations().then(function(registrations) {
+    for(let registration of registrations) {
+      registration.unregister();
+    }
+  });
+}
+
     function extractAndStoreInitialToken() {
       try {
         if (window.location.hash && window.location.hash.indexOf("id_token=") !== -1) {
