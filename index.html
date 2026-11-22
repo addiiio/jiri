@@ -127,9 +127,6 @@
   </div>
 
   <script>
-    // ========================================================================
-    // ★ [필수] 아래 따옴표 안에 구글 Apps Script 웹앱 배포 주소(.../exec)를 붙여넣으세요!
-    // ========================================================================
     const GAS_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyMGBhLugLehVIBEO_TTK3EucQ4_mGmjLo3bPhT30i-TyuMV3W4aqwthRjzrADjjQLw/exec";
 
     const GOOGLE_CLIENT_ID = "9947286323-k5bo8cr27vfk80180p3m7conuvrb56h4.apps.googleusercontent.com";
@@ -140,7 +137,6 @@
     let gasFrameSource = null;
     let deferredInstallPrompt = null;
 
-    // 0. 카카오톡 인앱 브라우저 자동 탈출 (안드로이드)
     (function escapeInAppBrowser() {
       const ua = navigator.userAgent || "";
       if (/KAKAOTALK/i.test(ua) && /Android/i.test(ua)) {
@@ -148,7 +144,6 @@
       }
     })();
 
-    // 0-1. 앱 설치 배너 제어 (이미 설치된 standalone 실행 시 자동 숨김)
     function isRunningStandalone() {
       return (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
         window.navigator.standalone === true;
@@ -208,14 +203,9 @@
       if (isIos) {
         installCtaBtn.style.display = "none";
         installGuideText.style.display = "block";
-        if (/KAKAOTALK/i.test(ua)) {
-          installGuideText.innerHTML = "📲 <b>우측 하단 [⋯] → Safari로 열기</b> 후<br>공유(<svg style="width:16px;height:16px;vertical-align:-2px;margin:0 2px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M4 11v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/></svg>) → <b>[홈 화면에 추가]</b>를 눌러주세요.";
-        } else {
-          installGuideText.innerHTML = "📲 하단 <b>공유 버튼(<svg style="width:16px;height:16px;vertical-align:-2px;margin:0 2px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M4 11v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/></svg>) → [홈 화면에 추가]</b>를<br>누르면 앱처럼 바로 사용할 수 있습니다.";
-        }
+        installGuideText.innerHTML = "📲 하단 <b>공유 버튼 → [홈 화면에 추가]</b>를 누르면 앱처럼 바로 사용할 수 있습니다.";
         installBanner.classList.add("show");
       } else if (isAndroid && /SamsungBrowser/i.test(ua)) {
-        // 삼성 인터넷에서 beforeinstallprompt가 늦거나 미발생 시에도 버튼 즉시 안내
         setTimeout(function() {
           if (!isRunningStandalone() && !deferredInstallPrompt && !installBanner.classList.contains("show")) {
             installGuideText.style.display = "none";
@@ -226,14 +216,12 @@
       }
     })();
 
-    // 1. Service Worker 등록 (안드로이드/데스크톱 PWA 앱 설치 지원)
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function() {
         navigator.serviceWorker.register("./sw.js").catch(function() {});
       });
     }
 
-    // 2. URL 해시(#id_token=...) 또는 저장소에서 토큰 읽기
     function extractAndStoreInitialToken() {
       try {
         if (window.location.hash && window.location.hash.indexOf("id_token=") !== -1) {
@@ -263,7 +251,6 @@
       try { sessionStorage.removeItem(TOKEN_STORAGE_KEY); } catch (e) {}
     }
 
-    // 3. 아이폰(iOS) ITP 대응: 1st-party localStorage 데이터를 iframe에 동기화
     function collectJinriStorageSnapshot() {
       const snapshot = {};
       try {
@@ -277,7 +264,6 @@
       return snapshot;
     }
 
-    // 4. Google OAuth 로그인 시작 (모든 OS에서 팝업 차단 없이 동작하는 동일 출처 리디렉션)
     function startPwaGoogleOAuth() {
       const redirectUri = new URL("./auth.html", window.location.href).href;
       const nonce = (window.crypto && typeof window.crypto.randomUUID === "function")
@@ -294,7 +280,6 @@
       window.location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + params.toString();
     }
 
-    // 5. iframe(Apps Script) <-> GitHub PWA 브리지 통신
     window.addEventListener("message", function(e) {
       const data = e && e.data;
       if (!data || typeof data !== "object") return;
@@ -332,7 +317,6 @@
       }
     });
 
-    // 5-1. iOS 앱 전환 복귀 시 화면 확대 버그 방지 및 주보 확대 연동
     let isPwaZoomAllowed = false;
     function setPwaZoomAllowed(allow) {
       isPwaZoomAllowed = Boolean(allow);
@@ -362,7 +346,6 @@
     window.addEventListener("pageshow", resetIosZoomOnResume);
     window.addEventListener("focus", resetIosZoomOnResume);
 
-    // 6. 초기화 및 앱 iframe 로드
     extractAndStoreInitialToken();
     const frameEl = document.getElementById("app-frame");
     const warnEl = document.getElementById("setup-warning");
