@@ -105,6 +105,25 @@
       color: #1e293b;
       line-height: 1.6;
     }
+    #pwa-back-toast {
+      display: none;
+      position: fixed;
+      bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 23, 42, 0.92);
+      color: #ffffff;
+      padding: 11px 18px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+      z-index: 10000;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+      max-width: 90vw;
+      text-align: center;
+      line-height: 1.4;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -125,8 +144,24 @@
       allowfullscreen
     ></iframe>
   </div>
+  <div id="pwa-back-toast"></div>
 
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js"></script>
   <script>
+    // ★ [필수] 파이어베이스 콘솔 [프로젝트 설정 → 클라우드 메시징 → 웹 푸시 인증서]에서
+    // [키 쌍 생성]으로 발급받은 공개 키(VAPID Key)를 아래 따옴표 안에 붙여넣으세요!
+    const VAPID_PUBLIC_KEY = "BCOa2ICSiQlSjHa9HIk-Iw9uRZR7p8xCb-ar6UjGXENEiVIfjKkc30SYi25b1QFIPNI6Us7zurDerfjUPuQztsI";
+
+    const FIREBASE_CONFIG = {
+      apiKey: "AIzaSyC2D3av97eAFqyOibTVHsAbkLVTbF2SyTo",
+      authDomain: "jiri-805c8.firebaseapp.com",
+      projectId: "jiri-805c8",
+      storageBucket: "jiri-805c8.firebasestorage.app",
+      messagingSenderId: "327026457231",
+      appId: "1:327026457231:web:ea72faeff93bc0e0b74efa"
+    };
+
     const GAS_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyMGBhLugLehVIBEO_TTK3EucQ4_mGmjLo3bPhT30i-TyuMV3W4aqwthRjzrADjjQLw/exec";
     const GOOGLE_CLIENT_ID = "9947286323-k5bo8cr27vfk80180p3m7conuvrb56h4.apps.googleusercontent.com";
     const TOKEN_STORAGE_KEY = "jinri_pwa_id_token_v1";
@@ -222,12 +257,134 @@
       }
     })();
 
-    // 1. Service Worker 등록
+    // 1. Service Worker 등록 및 Firebase FCM 푸시 초기화
+    let swRegistrationRef = null;
+    let firebaseMessagingRef = null;
+
+    function notifyIframePushStatus() {
+      if (!gasFrameSource || typeof gasFrameSource.postMessage !== "function") return;
+      let status = "unsupported";
+      if ("Notification" in window && "serviceWorker" in navigator && VAPID_PUBLIC_KEY) {
+        status = Notification.permission || "default";
+      }
+      try { gasFrameSource.postMessage({ type: "JINRI_PUSH_STATUS", status: status }, "*"); } catch (e) {}
+    }
+
+    function showLocalOrSwNotification(title, body) {
+      const t = String(title || "진리로교회 알림");
+      const b = String(body || "");
+      if (!("Notification" in window) || Notification.permission !== "granted") return;
+      const opts = { body: b, icon: "./Icon.png", badge: "./Icon.png" };
+      if (swRegistrationRef && typeof swRegistrationRef.showNotification === "function") {
+        swRegistrationRef.showNotification(t, opts).catch(function() {
+          try { new Notification(t, opts); } catch (e) {}
+        });
+      } else {
+        try { new Notification(t, opts); } catch (e) {}
+      }
+    }
+
+    async function fetchAndSendFcmToken(askPermissionIfDefault) {
+      if (!VAPID_PUBLIC_KEY || !("Notification" in window) || !("serviceWorker" in navigator)) {
+        notifyIframePushStatus();
+        return;
+      }
+      try {
+        if (!swRegistrationRef) {
+          swRegistrationRef = await navigator.serviceWorker.register("./sw.js");
+        }
+        let perm = Notification.permission;
+        if (perm === "default" && askPermissionIfDefault) {
+          perm = await Notification.requestPermission();
+        }
+        notifyIframePushStatus();
+        if (perm !== "granted") return;
+        if (typeof firebase === "undefined") return;
+        if (!firebase.apps || firebase.apps.length === 0) {
+          firebase.initializeApp(FIREBASE_CONFIG);
+        }
+        if (!firebaseMessagingRef && firebase.messaging && firebase.messaging.isSupported && firebase.messaging.isSupported()) {
+          firebaseMessagingRef = firebase.messaging();
+          firebaseMessagingRef.onMessage(function(payload) {
+            const n = payload && payload.notification ? payload.notification : {};
+            showLocalOrSwNotification(n.title || "진리로교회 알림", n.body || "");
+          });
+        }
+        if (!firebaseMessagingRef) return;
+        const token = await firebaseMessagingRef.getToken({
+          vapidKey: VAPID_PUBLIC_KEY,
+          serviceWorkerRegistration: swRegistrationRef
+        });
+        if (token && gasFrameSource && typeof gasFrameSource.postMessage === "function") {
+          gasFrameSource.postMessage({ type: "JINRI_FCM_TOKEN", token: token }, "*");
+        }
+      } catch (err) {}
+    }
+
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function() {
-        navigator.serviceWorker.register("./sw.js").catch(function() {});
+        navigator.serviceWorker.register("./sw.js").then(function(reg) {
+          swRegistrationRef = reg;
+          if ("Notification" in window && Notification.permission === "granted") {
+            fetchAndSendFcmToken(false);
+          }
+        }).catch(function() {});
       });
     }
+
+    // 1-1. 뒤로가기 버튼 2회 눌러 종료 방지 가드 (오디오 재생 끊김 방지)
+    let pwaBackToastTimer = null;
+    let pwaLastBackAt = 0;
+    let pwaOverlayWaitTimer = null;
+    let pwaAllowExit = false;
+
+    function showPwaBackToast(msg) {
+      const el = document.getElementById("pwa-back-toast");
+      if (!el) return;
+      el.innerText = msg;
+      el.style.display = "block";
+      if (pwaBackToastTimer) clearTimeout(pwaBackToastTimer);
+      pwaBackToastTimer = setTimeout(function() {
+        el.style.display = "none";
+      }, 2200);
+    }
+
+    function armBackGuardState() {
+      try {
+        history.pushState({ pwaGuard: true }, "", window.location.href);
+      } catch (e) {}
+    }
+    armBackGuardState();
+
+    function handleNoOverlayBackPress(isAudioPlaying) {
+      pwaLastBackAt = Date.now();
+      if (isAudioPlaying) {
+        showPwaBackToast("🎧 재생 중입니다. 한 번 더 누르면 종료됩니다. (계속 들으려면 홈 버튼)");
+      } else {
+        showPwaBackToast("뒤로 버튼을 한 번 더 누르면 앱이 종료됩니다.");
+      }
+    }
+
+    window.addEventListener("popstate", function() {
+      if (pwaAllowExit) return;
+      const now = Date.now();
+      if (now - pwaLastBackAt < 2200) {
+        pwaAllowExit = true;
+        history.back();
+        return;
+      }
+      armBackGuardState();
+      if (gasFrameSource && typeof gasFrameSource.postMessage === "function") {
+        if (pwaOverlayWaitTimer) clearTimeout(pwaOverlayWaitTimer);
+        pwaOverlayWaitTimer = setTimeout(function() {
+          pwaOverlayWaitTimer = null;
+          handleNoOverlayBackPress(false);
+        }, 180);
+        try { gasFrameSource.postMessage({ type: "JINRI_CHECK_CLOSE_OVERLAY" }, "*"); } catch (e) {}
+      } else {
+        handleNoOverlayBackPress(false);
+      }
+    });
 
     // 2. 토큰 읽기 및 관리
     function extractAndStoreInitialToken() {
@@ -365,6 +522,21 @@
         }
       } else if (data.type === "JINRI_SET_ZOOM") {
         setPwaZoomAllowed(Boolean(data.allow));
+      } else if (data.type === "JINRI_REQUEST_PUSH_INIT") {
+        notifyIframePushStatus();
+        fetchAndSendFcmToken(false);
+      } else if (data.type === "JINRI_REQUEST_PUSH_PERMISSION") {
+        fetchAndSendFcmToken(true);
+      } else if (data.type === "JINRI_LOCAL_NOTIFY") {
+        showLocalOrSwNotification(data.title || "진리로교회 알림", data.body || "");
+      } else if (data.type === "JINRI_OVERLAY_RESULT") {
+        if (pwaOverlayWaitTimer) {
+          clearTimeout(pwaOverlayWaitTimer);
+          pwaOverlayWaitTimer = null;
+        }
+        if (!data.closed) {
+          handleNoOverlayBackPress(Boolean(data.isAudioPlaying));
+        }
       }
     });
 
