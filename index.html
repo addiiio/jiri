@@ -580,6 +580,106 @@
     } else {
       frameEl.src = GAS_WEBAPP_URL;
     }
-  </script>
+  <script>
+  (function() {
+    let pwaVoiceRec = null;
+
+    function postToAppFrame(sourceWin, payload) {
+      try {
+        if (sourceWin && typeof sourceWin.postMessage === "function") {
+          sourceWin.postMessage(payload, "*");
+          return;
+        }
+      } catch (e) {}
+      try {
+        const frame = document.querySelector("iframe");
+        if (frame && frame.contentWindow) {
+          frame.contentWindow.postMessage(payload, "*");
+        }
+      } catch (e) {}
+    }
+
+    window.addEventListener("message", function(e) {
+      const data = e && e.data;
+      if (!data || typeof data !== "object") return;
+
+      if (data.type === "JINRI_STOP_VOICE") {
+        if (pwaVoiceRec) {
+          try { pwaVoiceRec.stop(); } catch (err) {}
+          pwaVoiceRec = null;
+        }
+        return;
+      }
+
+      if (data.type === "JINRI_START_VOICE") {
+        const targetWin = e.source;
+        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRec) {
+          postToAppFrame(targetWin, {
+            type: "JINRI_VOICE_ERROR",
+            message: "이 브라우저에서는 음성 인식을 지원하지 않습니다. 키보드 마이크를 이용해 주세요."
+          });
+          return;
+        }
+
+        if (pwaVoiceRec) {
+          try { pwaVoiceRec.abort(); } catch (err) {}
+          pwaVoiceRec = null;
+        }
+
+        try {
+          const rec = new SpeechRec();
+          rec.lang = data.lang || "ko-KR";
+          rec.interimResults = false;
+          rec.maxAlternatives = 1;
+          pwaVoiceRec = rec;
+
+          rec.onstart = function() {
+            postToAppFrame(targetWin, { type: "JINRI_VOICE_START" });
+          };
+
+          rec.onresult = function(ev) {
+            const transcript =
+              ev && ev.results && ev.results[0] && ev.results[0][0]
+                ? String(ev.results[0][0].transcript || "").trim()
+                : "";
+            pwaVoiceRec = null;
+            postToAppFrame(targetWin, {
+              type: "JINRI_VOICE_RESULT",
+              transcript: transcript
+            });
+          };
+
+          rec.onerror = function(ev) {
+            pwaVoiceRec = null;
+            const errCode = ev && ev.error ? String(ev.error) : "";
+            let msg = "음성 인식에 실패했습니다. 다시 시도해 주세요.";
+            if (errCode === "not-allowed" || errCode === "service-not-allowed") {
+              msg = "마이크 권한이 거부되었습니다. 브라우저 설정에서 마이크를 허용해 주세요.";
+            } else if (errCode === "no-speech") {
+              msg = "음성이 감지되지 않았습니다. 마이크를 다시 눌러 말씀해 주세요.";
+            } else if (errCode === "audio-capture") {
+              msg = "사용 가능한 마이크를 찾을 수 없습니다.";
+            }
+            postToAppFrame(targetWin, { type: "JINRI_VOICE_ERROR", message: msg });
+          };
+
+          rec.onend = function() {
+            pwaVoiceRec = null;
+            postToAppFrame(targetWin, { type: "JINRI_VOICE_END" });
+          };
+
+          rec.start();
+        } catch (err) {
+          pwaVoiceRec = null;
+          postToAppFrame(targetWin, {
+            type: "JINRI_VOICE_ERROR",
+            message: "음성 인식을 시작할 수 없습니다."
+          });
+        }
+      }
+    });
+  })();
+</script>
 </body>
 </html>
