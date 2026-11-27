@@ -154,7 +154,7 @@
   <script>
     // ★ [필수] 파이어베이스 콘솔 [프로젝트 설정 → 클라우드 메시징 → 웹 푸시 인증서]에서
     // [키 쌍 생성]으로 발급받은 공개 키(VAPID Key)를 아래 따옴표 안에 붙여넣으세요!
-    const VAPID_PUBLIC_KEY = "BCOa2ICSiQlSjHa9HIk-Iw9uRZR7p8xCb-ar6UjGXENEiVIfjKkc30SYi25b1QFIPNI6Us7zurDerfjUPuQztsI";
+    const VAPID_PUBLIC_KEY = "";
 
     const FIREBASE_CONFIG = {
       apiKey: "AIzaSyC2D3av97eAFqyOibTVHsAbkLVTbF2SyTo",
@@ -308,10 +308,13 @@
         }
         if (!firebaseMessagingRef && firebase.messaging && firebase.messaging.isSupported && firebase.messaging.isSupported()) {
           firebaseMessagingRef = firebase.messaging();
-          firebaseMessagingRef.onMessage(function(payload) {
-            const n = payload && payload.notification ? payload.notification : {};
-            showLocalOrSwNotification(n.title || "진리로교회 알림", n.body || "");
-          });
+          // 포그라운드 메시지 수신 시 중복 알림 방지를 위해 빈 핸들러로 등록
+          if (!firebaseMessagingRef.onMessageRegistered) {
+            firebaseMessagingRef.onMessageRegistered = true;
+            firebaseMessagingRef.onMessage(function(payload) {
+              // 포그라운드 중복 팝업 생성 방지
+            });
+          }
         }
         if (!firebaseMessagingRef) return;
         const token = await firebaseMessagingRef.getToken({
@@ -459,7 +462,6 @@
       const isNaverBlogOrCafe = /(?:m\.)?(?:blog|cafe)\.naver\.com/i.test(origUrl);
 
       if (isNaverBlogOrCafe) {
-        // 네이버 공식 통합앱(NAVER App) Universal Link / Custom Scheme 사용
         const naverAppInAppUrl = "naversearchapp://inappbrowser?url=" + encodeURIComponent(origUrl) + "&target=new&version=6";
         if (isAndroid) {
           const fallbackEncoded = encodeURIComponent(origUrl);
@@ -504,7 +506,6 @@
       } else if (data.type === "JINRI_LOGOUT" || data.type === "JINRI_AUTH_FAILED") {
         clearStoredToken();
       } else if (data.type === "JINRI_RELOAD_APP") {
-        // iframe 내부 reload() 대신 최상위 PWA 페이지 전체를 깔끔하게 재시작
         window.location.reload();
       } else if (data.type === "JINRI_OPEN_EXTERNAL") {
         openNaverOrExternalApp(String(data.url || ""));
@@ -685,5 +686,3 @@
     });
   })();
   </script>
-</body>
-</html>
