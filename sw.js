@@ -1,4 +1,4 @@
-// 진리로교회 PWA 서비스 워커 (v6: FCM 백그라운드 푸시 알림 + 앱 설치 지원)
+// 진리로교회 PWA 서비스 워커 (v7: FCM 백그라운드 푸시 알림 + Badge.png 분리)
 importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js');
 
@@ -19,7 +19,7 @@ messaging.onBackgroundMessage(function(payload) {
   const options = {
     body: n.body || "새로운 소식이 도착했습니다.",
     icon: "./Icon.png",
-    badge: "./Icon.png",
+    badge: "./Badge.png",
     data: { url: "./" }
   };
   return self.registration.showNotification(title, options);
