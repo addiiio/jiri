@@ -154,7 +154,7 @@
   <script>
     // ★ [필수] 파이어베이스 콘솔 [프로젝트 설정 → 클라우드 메시징 → 웹 푸시 인증서]에서
     // [키 쌍 생성]으로 발급받은 공개 키(VAPID Key)를 아래 따옴표 안에 붙여넣으세요!
-    const VAPID_PUBLIC_KEY = "";
+    const VAPID_PUBLIC_KEY = "BCOa2ICSiQlSjHa9HIk-Iw9uRZR7p8xCb-ar6UjGXENEiVIfjKkc30SYi25b1QFIPNI6Us7zurDerfjUPuQztsI";
 
     const FIREBASE_CONFIG = {
       apiKey: "AIzaSyC2D3av97eAFqyOibTVHsAbkLVTbF2SyTo",
@@ -277,7 +277,7 @@
       const t = String(title || "진리로교회 알림");
       const b = String(body || "");
       if (!("Notification" in window) || Notification.permission !== "granted") return;
-      const opts = { body: b, icon: "./Icon.png", badge: "./Icon.png" };
+      const opts = { body: b, icon: "./Icon.png", badge: "./Badge.png" };
       if (swRegistrationRef && typeof swRegistrationRef.showNotification === "function") {
         swRegistrationRef.showNotification(t, opts).catch(function() {
           try { new Notification(t, opts); } catch (e) {}
