@@ -152,8 +152,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js"></script>
   <script>
-    // ★ [필수] 파이어베이스 콘솔 [프로젝트 설정 → 클라우드 메시징 → 웹 푸시 인증서]에서
-    // [키 쌍 생성]으로 발급받은 공개 키(VAPID Key)를 아래 따옴표 안에 붙여넣으세요!
     const VAPID_PUBLIC_KEY = "BCOa2ICSiQlSjHa9HIk-Iw9uRZR7p8xCb-ar6UjGXENEiVIfjKkc30SYi25b1QFIPNI6Us7zurDerfjUPuQztsI";
 
     const FIREBASE_CONFIG = {
@@ -172,7 +170,19 @@
 
     let cachedIdToken = "";
     let gasFrameSource = null;
+    let gasFrameOrigin = "";
     let deferredInstallPrompt = null;
+
+    function isAllowedGasOrigin(origin) {
+      if (!origin) return false;
+      return origin === "https://script.google.com" ||
+        /^https:\/\/[a-z0-9-]+\.(?:script\.)?googleusercontent\.com$/i.test(origin);
+    }
+
+    function postToGasFrame(payload) {
+      if (!gasFrameSource || typeof gasFrameSource.postMessage !== "function" || !gasFrameOrigin) return;
+      try { gasFrameSource.postMessage(payload, gasFrameOrigin); } catch (e) {}
+    }
 
     // 0. 카카오톡 인앱 브라우저 자동 탈출 (안드로이드)
     (function escapeInAppBrowser() {
@@ -265,12 +275,11 @@
     let firebaseMessagingRef = null;
 
     function notifyIframePushStatus() {
-      if (!gasFrameSource || typeof gasFrameSource.postMessage !== "function") return;
       let status = "unsupported";
       if ("Notification" in window && "serviceWorker" in navigator && VAPID_PUBLIC_KEY) {
         status = Notification.permission || "default";
       }
-      try { gasFrameSource.postMessage({ type: "JINRI_PUSH_STATUS", status: status }, "*"); } catch (e) {}
+      postToGasFrame({ type: "JINRI_PUSH_STATUS", status: status });
     }
 
     function showLocalOrSwNotification(title, body) {
@@ -308,12 +317,9 @@
         }
         if (!firebaseMessagingRef && firebase.messaging && firebase.messaging.isSupported && firebase.messaging.isSupported()) {
           firebaseMessagingRef = firebase.messaging();
-          // 포그라운드 메시지 수신 시 중복 알림 방지를 위해 빈 핸들러로 등록
           if (!firebaseMessagingRef.onMessageRegistered) {
             firebaseMessagingRef.onMessageRegistered = true;
-            firebaseMessagingRef.onMessage(function(payload) {
-              // 포그라운드 중복 팝업 생성 방지
-            });
+            firebaseMessagingRef.onMessage(function(payload) {});
           }
         }
         if (!firebaseMessagingRef) return;
@@ -321,8 +327,8 @@
           vapidKey: VAPID_PUBLIC_KEY,
           serviceWorkerRegistration: swRegistrationRef
         });
-        if (token && gasFrameSource && typeof gasFrameSource.postMessage === "function") {
-          gasFrameSource.postMessage({ type: "JINRI_FCM_TOKEN", token: token }, "*");
+        if (token) {
+          postToGasFrame({ type: "JINRI_FCM_TOKEN", token: token });
         }
       } catch (err) {}
     }
@@ -380,13 +386,13 @@
         return;
       }
       armBackGuardState();
-      if (gasFrameSource && typeof gasFrameSource.postMessage === "function") {
+      if (gasFrameSource && gasFrameOrigin) {
         if (pwaOverlayWaitTimer) clearTimeout(pwaOverlayWaitTimer);
         pwaOverlayWaitTimer = setTimeout(function() {
           pwaOverlayWaitTimer = null;
           handleNoOverlayBackPress(false);
         }, 180);
-        try { gasFrameSource.postMessage({ type: "JINRI_CHECK_CLOSE_OVERLAY" }, "*"); } catch (e) {}
+        postToGasFrame({ type: "JINRI_CHECK_CLOSE_OVERLAY" });
       } else {
         handleNoOverlayBackPress(false);
       }
@@ -455,7 +461,7 @@
 
     // 4-1. 외부 앱(네이버 앱 등) 안전 실행 헬퍼 (최상위 창에서 실행)
     function openNaverOrExternalApp(origUrl) {
-      if (!origUrl) return;
+      if (!origUrl || !/^https?:\/\//i.test(origUrl)) return;
       const ua = navigator.userAgent || "";
       const isAndroid = /Android/i.test(ua);
       const isIos = /iPhone|iPad|iPod/i.test(ua);
@@ -487,20 +493,20 @@
       window.open(origUrl, "_blank", "noopener,noreferrer");
     }
 
-    // 5. iframe <-> GitHub PWA 브리지 통신
+    // 5. iframe <-> GitHub PWA 브리지 통신 (오리진 검증 적용)
     window.addEventListener("message", function(e) {
+      if (!isAllowedGasOrigin(e.origin)) return;
       const data = e && e.data;
       if (!data || typeof data !== "object") return;
 
       if (data.type === "JINRI_IFRAME_READY") {
         gasFrameSource = e.source;
-        if (gasFrameSource && typeof gasFrameSource.postMessage === "function") {
-          gasFrameSource.postMessage({
-            type: "JINRI_PWA_INIT",
-            idToken: cachedIdToken || "",
-            storage: collectJinriStorageSnapshot()
-          }, "*");
-        }
+        gasFrameOrigin = e.origin;
+        postToGasFrame({
+          type: "JINRI_PWA_INIT",
+          idToken: cachedIdToken || "",
+          storage: collectJinriStorageSnapshot()
+        });
       } else if (data.type === "JINRI_START_OAUTH") {
         startPwaGoogleOAuth();
       } else if (data.type === "JINRI_LOGOUT" || data.type === "JINRI_AUTH_FAILED") {
@@ -589,22 +595,24 @@
   (function() {
     let pwaVoiceRec = null;
 
-    function postToAppFrame(sourceWin, payload) {
+    function isAllowedVoiceOrigin(origin) {
+      if (!origin) return false;
+      return origin === "https://script.google.com" ||
+        /^https:\/\/[a-z0-9-]+\.(?:script\.)?googleusercontent\.com$/i.test(origin);
+    }
+
+    function postToAppFrame(sourceWin, targetOrigin, payload) {
+      if (!targetOrigin) return;
       try {
         if (sourceWin && typeof sourceWin.postMessage === "function") {
-          sourceWin.postMessage(payload, "*");
+          sourceWin.postMessage(payload, targetOrigin);
           return;
-        }
-      } catch (e) {}
-      try {
-        const frame = document.querySelector("iframe");
-        if (frame && frame.contentWindow) {
-          frame.contentWindow.postMessage(payload, "*");
         }
       } catch (e) {}
     }
 
     window.addEventListener("message", function(e) {
+      if (!isAllowedVoiceOrigin(e.origin)) return;
       const data = e && e.data;
       if (!data || typeof data !== "object") return;
 
@@ -618,9 +626,10 @@
 
       if (data.type === "JINRI_START_VOICE") {
         const targetWin = e.source;
+        const targetOrigin = e.origin;
         const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRec) {
-          postToAppFrame(targetWin, {
+          postToAppFrame(targetWin, targetOrigin, {
             type: "JINRI_VOICE_ERROR",
             message: "이 브라우저에서는 음성 인식을 지원하지 않습니다. 키보드 마이크를 이용해 주세요."
           });
@@ -640,7 +649,7 @@
           pwaVoiceRec = rec;
 
           rec.onstart = function() {
-            postToAppFrame(targetWin, { type: "JINRI_VOICE_START" });
+            postToAppFrame(targetWin, targetOrigin, { type: "JINRI_VOICE_START" });
           };
 
           rec.onresult = function(ev) {
@@ -649,7 +658,7 @@
                 ? String(ev.results[0][0].transcript || "").trim()
                 : "";
             pwaVoiceRec = null;
-            postToAppFrame(targetWin, {
+            postToAppFrame(targetWin, targetOrigin, {
               type: "JINRI_VOICE_RESULT",
               transcript: transcript
             });
@@ -666,18 +675,18 @@
             } else if (errCode === "audio-capture") {
               msg = "사용 가능한 마이크를 찾을 수 없습니다.";
             }
-            postToAppFrame(targetWin, { type: "JINRI_VOICE_ERROR", message: msg });
+            postToAppFrame(targetWin, targetOrigin, { type: "JINRI_VOICE_ERROR", message: msg });
           };
 
           rec.onend = function() {
             pwaVoiceRec = null;
-            postToAppFrame(targetWin, { type: "JINRI_VOICE_END" });
+            postToAppFrame(targetWin, targetOrigin, { type: "JINRI_VOICE_END" });
           };
 
           rec.start();
         } catch (err) {
           pwaVoiceRec = null;
-          postToAppFrame(targetWin, {
+          postToAppFrame(targetWin, targetOrigin, {
             type: "JINRI_VOICE_ERROR",
             message: "음성 인식을 시작할 수 없습니다."
           });
